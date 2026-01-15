@@ -117,8 +117,9 @@ class LinkDialog(Gtk.Window):
         self.entry.grab_focus()
         self.connect("close-request", self._on_close)
 
-        # Add keyboard event controller for Esc key
+        # Add keyboard event controller for Esc key (use capture phase)
         key_controller = Gtk.EventControllerKey()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(key_controller)
 
