@@ -19,13 +19,8 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         )
 
     def _on_refresh_clicked(self, menu, *args):
-        # vfs/forget is instant and equivalent to SIGHUP. 
-        # It clears the cache so the next access forces a fresh fetch.
-        script = (
-            'notify-send "Rclone" "Clearing directory cache..." && '
-            'rclone rc vfs/forget && '
-            'notify-send "Rclone" "Cache cleared. Next access will be fresh."'
-        )
+        # vfs/forget is instant, so a single notification is enough
+        script = 'rclone rc vfs/forget && notify-send "Rclone" "Directory cache refreshed"'
         subprocess.Popen(["bash", "-c", script])
 
     def get_background_items(self, *args):
