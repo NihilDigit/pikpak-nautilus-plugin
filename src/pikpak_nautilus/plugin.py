@@ -19,8 +19,13 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         )
 
     def _on_refresh_clicked(self, menu, *args):
-        # Using vfs/refresh is better than forget because it pre-fetches the structure
-        subprocess.run(['rclone', 'rc', 'vfs/refresh', 'recursive=true', '--fast-list'])
+        # Using a shell script via Popen to keep it non-blocking and show notifications
+        script = (
+            'notify-send "Rclone" "Refreshing directory cache..." && '
+            'rclone rc vfs/refresh recursive=true --fast-list && '
+            'notify-send "Rclone" "Cache refresh complete."'
+        )
+        subprocess.Popen(["bash", "-c", script])
 
     def get_background_items(self, *args):
         items = []
