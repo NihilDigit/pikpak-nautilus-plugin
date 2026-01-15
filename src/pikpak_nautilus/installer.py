@@ -23,16 +23,31 @@ except ImportError as e:
 DESKTOP_TEMPLATE = """\
 [Desktop Entry]
 Version=1.0
-Name=PikPak Download
+Name=PikPak
 GenericName=Download Manager
 Comment=Add magnet links to PikPak
 Exec={wrapper_path} %u
-Icon=folder-download
+Icon={icon_path}
 Terminal=false
 Type=Application
 Categories=Network;FileTransfer;
 MimeType=x-scheme-handler/magnet;
 StartupNotify=false
+NoDisplay=true
+"""
+
+LAUNCHER_TEMPLATE = """\
+[Desktop Entry]
+Version=1.0
+Name=PikPak
+Comment=Add download link to PikPak
+Exec={wrapper_path}
+Icon={icon_path}
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;
+StartupNotify=false
+Keywords=magnet;download;pikpak;
 """
 
 WRAPPER_SCRIPT = """\
@@ -43,7 +58,16 @@ exec python3 "{dialog_path}" --submit "$@"
 
 def install():
     pkg_path = str(Path(__file__).parent.parent)
-    dialog_path = str(Path(__file__).parent / "dialog.py")
+    pkg_dir = Path(__file__).parent
+    dialog_path = str(pkg_dir / "dialog.py")
+    icon_src = pkg_dir / "pikpak.svg"
+
+    # Install icon
+    icon_dir = Path.home() / ".local/share/icons/hicolor/scalable/apps"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+    icon_path = icon_dir / "pikpak.svg"
+    shutil.copy(icon_src, icon_path)
+    print(f"Installed icon: {icon_path}")
 
     # Install Nautilus extension loader
     ext_dir = Path.home() / ".local/share/nautilus-python/extensions"
@@ -52,7 +76,7 @@ def install():
     loader_file.write_text(LOADER_TEMPLATE.format(pkg_path=pkg_path))
     print(f"Installed Nautilus extension: {loader_file}")
 
-    # Install wrapper script to ~/.local/bin
+    # Install wrapper script
     bin_dir = Path.home() / ".local/bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     wrapper_path = bin_dir / "pikpak-add"
@@ -60,31 +84,41 @@ def install():
     wrapper_path.chmod(0o755)
     print(f"Installed wrapper script: {wrapper_path}")
 
-    # Install .desktop file for pikpak:// URL scheme
     apps_dir = Path.home() / ".local/share/applications"
     apps_dir.mkdir(parents=True, exist_ok=True)
-    desktop_file = apps_dir / "pikpak-handler.desktop"
-    desktop_file.write_text(DESKTOP_TEMPLATE.format(wrapper_path=wrapper_path))
-    print(f"Installed URL handler: {desktop_file}")
+
+    # Install magnet: handler (hidden from app menu)
+    handler_file = apps_dir / "pikpak-handler.desktop"
+    handler_file.write_text(DESKTOP_TEMPLATE.format(wrapper_path=wrapper_path, icon_path=icon_path))
+    print(f"Installed URL handler: {handler_file}")
+
+    # Install launcher (visible in app menu)
+    launcher_file = apps_dir / "pikpak.desktop"
+    launcher_file.write_text(LAUNCHER_TEMPLATE.format(wrapper_path=wrapper_path, icon_path=icon_path))
+    print(f"Installed launcher: {launcher_file}")
 
     # Register as magnet: handler
     subprocess.run(['xdg-mime', 'default', 'pikpak-handler.desktop', 'x-scheme-handler/magnet'],
                    capture_output=True)
     subprocess.run(['update-desktop-database', str(apps_dir)], capture_output=True)
+    subprocess.run(['gtk-update-icon-cache', '-f', '-t', str(icon_dir.parent.parent)],
+                   capture_output=True)
     print("Registered as magnet: handler")
 
     print("\nPlease restart Nautilus: nautilus -q")
 
 
 def uninstall():
-    loader_file = Path.home() / ".local/share/nautilus-python/extensions/pikpak_nautilus_loader.py"
-    desktop_file = Path.home() / ".local/share/applications/pikpak-handler.desktop"
-    wrapper_file = Path.home() / ".local/bin/pikpak-add"
+    files = [
+        (Path.home() / ".local/share/nautilus-python/extensions/pikpak_nautilus_loader.py", "Nautilus extension"),
+        (Path.home() / ".local/share/applications/pikpak-handler.desktop", "URL handler"),
+        (Path.home() / ".local/share/applications/pikpak.desktop", "launcher"),
+        (Path.home() / ".local/bin/pikpak-add", "wrapper script"),
+        (Path.home() / ".local/share/icons/hicolor/scalable/apps/pikpak.svg", "icon"),
+    ]
 
     removed = False
-    for f, name in [(loader_file, "Nautilus extension"),
-                    (desktop_file, "URL handler"),
-                    (wrapper_file, "wrapper script")]:
+    for f, name in files:
         if f.exists():
             f.unlink()
             print(f"Removed {name}")

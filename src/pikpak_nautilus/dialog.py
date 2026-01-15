@@ -4,35 +4,53 @@ import argparse
 import json
 import subprocess
 import sys
+import threading
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, GLib
 
 
-def submit_to_pikpak(url):
-    """Submit URL to PikPak and return result."""
+def get_clipboard():
+    """Get clipboard text, supports Wayland and X11."""
     try:
-        result = subprocess.run(
-            ['rclone', 'backend', 'addurl', 'pikpak:My Pack', url],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0 and result.stdout:
-            data = json.loads(result.stdout)
-            name = data.get('file_name', 'Unknown')
-            status = data.get('message', 'Submitted')
-            subprocess.Popen(['notify-send', 'PikPak', f'{name}\n{status}'])
-            return True
+        if subprocess.run(['which', 'wl-paste'], capture_output=True).returncode == 0:
+            return subprocess.check_output(['wl-paste'], stderr=subprocess.DEVNULL).decode('utf-8').strip()
         else:
-            error = result.stderr or 'Unknown error'
-            subprocess.Popen(['notify-send', 'PikPak Error', error[:100]])
-            return False
-    except subprocess.TimeoutExpired:
-        subprocess.Popen(['notify-send', 'PikPak Error', 'Request timed out'])
-        return False
-    except Exception as e:
-        subprocess.Popen(['notify-send', 'PikPak Error', str(e)[:100]])
-        return False
+            return subprocess.check_output(['xclip', '-o', '-sel', 'clip'], stderr=subprocess.DEVNULL).decode('utf-8').strip()
+    except:
+        return ""
+
+
+def submit_to_pikpak(url, on_complete=None):
+    """Submit URL to PikPak. Calls on_complete(success) when done."""
+    def do_submit():
+        success = False
+        try:
+            result = subprocess.run(
+                ['rclone', 'backend', 'addurl', 'pikpak:My Pack', url],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout)
+                name = data.get('file_name', 'Unknown')
+                status = data.get('message', 'Submitted')
+                subprocess.Popen(['notify-send', 'PikPak', f'{name}\n{status}'])
+                success = True
+            else:
+                error = result.stderr or 'Unknown error'
+                subprocess.Popen(['notify-send', 'PikPak Error', error[:100]])
+        except subprocess.TimeoutExpired:
+            subprocess.Popen(['notify-send', 'PikPak Error', 'Request timed out'])
+        except Exception as e:
+            subprocess.Popen(['notify-send', 'PikPak Error', str(e)[:100]])
+
+        if on_complete:
+            GLib.idle_add(on_complete, success)
+
+    thread = threading.Thread(target=do_submit)
+    thread.daemon = True
+    thread.start()
 
 
 class LinkDialog(Gtk.Window):
@@ -60,9 +78,6 @@ class LinkDialog(Gtk.Window):
         self.entry.set_hexpand(True)
         self.entry.set_placeholder_text("magnet:?xt=... or https://...")
         self.entry.connect("activate", self._on_submit)
-        if prefill:
-            self.entry.set_text(prefill)
-            self.entry.set_position(-1)
         entry_box.append(self.entry)
 
         paste_btn = Gtk.Button()
@@ -76,14 +91,27 @@ class LinkDialog(Gtk.Window):
         btn_box.set_margin_top(6)
         box.append(btn_box)
 
-        cancel_btn = Gtk.Button(label="Cancel")
-        cancel_btn.connect("clicked", self._on_cancel)
-        btn_box.append(cancel_btn)
+        self.cancel_btn = Gtk.Button(label="Cancel")
+        self.cancel_btn.connect("clicked", self._on_cancel)
+        btn_box.append(self.cancel_btn)
 
-        submit_btn = Gtk.Button(label="Submit")
-        submit_btn.add_css_class("suggested-action")
-        submit_btn.connect("clicked", self._on_submit)
-        btn_box.append(submit_btn)
+        self.submit_btn = Gtk.Button(label="Submit")
+        self.submit_btn.add_css_class("suggested-action")
+        self.submit_btn.connect("clicked", self._on_submit)
+        btn_box.append(self.submit_btn)
+
+        self.spinner = Gtk.Spinner()
+        btn_box.append(self.spinner)
+
+        # Auto-fill: use prefill, or check clipboard for magnet link
+        if prefill:
+            self.entry.set_text(prefill)
+            self.entry.set_position(-1)
+        else:
+            clipboard = get_clipboard()
+            if clipboard.startswith('magnet:'):
+                self.entry.set_text(clipboard)
+                self.entry.set_position(-1)
 
         self.entry.grab_focus()
         self.connect("close-request", self._on_close)
@@ -91,29 +119,33 @@ class LinkDialog(Gtk.Window):
     def set_submit_mode(self, enabled):
         self._submit_mode = enabled
 
-    def _get_clipboard_text(self):
-        try:
-            if subprocess.run(['which', 'wl-paste'], capture_output=True).returncode == 0:
-                return subprocess.check_output(['wl-paste'], stderr=subprocess.DEVNULL).decode('utf-8').strip()
-            else:
-                return subprocess.check_output(['xclip', '-o', '-sel', 'clip'], stderr=subprocess.DEVNULL).decode('utf-8').strip()
-        except:
-            return ""
-
     def _on_paste(self, btn):
-        text = self._get_clipboard_text()
+        text = get_clipboard()
         if text:
             self.entry.set_text(text)
             self.entry.set_position(-1)
+
+    def _set_loading(self, loading):
+        self.entry.set_sensitive(not loading)
+        self.submit_btn.set_sensitive(not loading)
+        self.cancel_btn.set_sensitive(not loading)
+        if loading:
+            self.spinner.start()
+        else:
+            self.spinner.stop()
+
+    def _on_submit_complete(self, success):
+        self.get_application().quit()
 
     def _on_submit(self, *args):
         text = self.entry.get_text().strip()
         if text:
             if self._submit_mode:
-                submit_to_pikpak(text)
+                self._set_loading(True)
+                submit_to_pikpak(text, self._on_submit_complete)
             else:
                 print(text)
-            self.get_application().quit()
+                self.get_application().quit()
 
     def _on_cancel(self, *args):
         self.get_application().set_exit_code(1)
