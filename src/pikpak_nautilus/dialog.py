@@ -37,9 +37,25 @@ def submit_to_pikpak(url, on_complete=None):
                 name = data.get('file_name', 'Unknown')
                 status = data.get('message', 'Submitted')
                 subprocess.Popen(['notify-send', 'PikPak', f'{name}\n{status}'])
-                # Clear cache via SIGHUP instantly
-                refresh_cmd = 'killall -SIGHUP rclone && notify-send "Rclone" "Cache refreshed."'
-                subprocess.Popen(['bash', '-c', refresh_cmd])
+                # Debounced refresh: waits 10s after the LAST download request
+                # This prevents rapid-fire refreshes when adding many links
+                debounce_cmd = (
+                    'mkdir -p /tmp/pikpak_refresh && '
+                    'date +%s > /tmp/pikpak_refresh/last_req && '
+                    'flock -n /tmp/pikpak_refresh/lock bash -c "'
+                    '  while true; do '
+                    '    last=\\$(cat /tmp/pikpak_refresh/last_req); '
+                    '    now=\\$(date +%s); '
+                    '    if [ \\$((now - last)) -ge 10 ]; then '
+                    '      rclone rc vfs/forget && '
+                    '      rclone rc vfs/refresh recursive=true asynchronous=true && '
+                    '      notify-send \\"Rclone\\" \\"Batch cache refresh complete\\"; '
+                    '      break; '
+                    '    fi; '
+                    '    sleep 2; '
+                    '  done"'
+                )
+                subprocess.Popen(['bash', '-c', debounce_cmd])
                 success = True
             else:
                 error = result.stderr or 'Unknown error'

@@ -19,8 +19,13 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         )
 
     def _on_refresh_clicked(self, menu, *args):
-        # SIGHUP is the most reliable way to force a full VFS cache reset
-        script = 'killall -SIGHUP rclone && notify-send "Rclone" "Directory cache refreshed"'
+        # Combining forget and refresh for maximum reliability
+        # asynchronous=true ensures it returns immediately to keep UI responsive
+        script = (
+            'rclone rc vfs/forget && '
+            'rclone rc vfs/refresh recursive=true asynchronous=true && '
+            'notify-send "Rclone" "Cache refreshed"'
+        )
         subprocess.Popen(["bash", "-c", script])
 
     def get_background_items(self, *args):
