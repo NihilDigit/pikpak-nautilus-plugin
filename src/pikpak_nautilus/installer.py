@@ -1,8 +1,8 @@
-import os
-import sys
+import shutil
+import subprocess
 from pathlib import Path
 
-LOADER_TEMPLATE = """
+LOADER_TEMPLATE = """\
 import sys
 import os
 
@@ -20,27 +20,75 @@ except ImportError as e:
     subprocess.run(['notify-send', 'PikPak Plugin Error', f'Could not load plugin: {{e}}'])
 """
 
+DESKTOP_TEMPLATE = """\
+[Desktop Entry]
+Version=1.0
+Name=PikPak Download
+GenericName=Download Manager
+Comment=Add magnet links to PikPak
+Exec={wrapper_path} %u
+Icon=folder-download
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;
+MimeType=x-scheme-handler/magnet;
+StartupNotify=false
+"""
+
+WRAPPER_SCRIPT = """\
+#!/bin/sh
+exec python3 "{dialog_path}" --submit "$@"
+"""
+
+
 def install():
-    # 1. 确定插件目录
+    pkg_path = str(Path(__file__).parent.parent)
+    dialog_path = str(Path(__file__).parent / "dialog.py")
+
+    # Install Nautilus extension loader
     ext_dir = Path.home() / ".local/share/nautilus-python/extensions"
     ext_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 2. 获取当前包所在的 site-packages 路径
-    # 当作为 uv tool install 时，__file__ 会指向工具的虚拟环境
-    pkg_path = str(Path(__file__).parent.parent)
-    
-    # 3. 写入加载器
     loader_file = ext_dir / "pikpak_nautilus_loader.py"
-    with open(loader_file, "w") as f:
-        f.write(LOADER_TEMPLATE.format(pkg_path=pkg_path))
-    
-    print(f"Successfully installed Nautilus extension loader to {loader_file}")
-    print("Please restart Nautilus with 'nautilus -q' to apply changes.")
+    loader_file.write_text(LOADER_TEMPLATE.format(pkg_path=pkg_path))
+    print(f"Installed Nautilus extension: {loader_file}")
+
+    # Install wrapper script to ~/.local/bin
+    bin_dir = Path.home() / ".local/bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_path = bin_dir / "pikpak-add"
+    wrapper_path.write_text(WRAPPER_SCRIPT.format(dialog_path=dialog_path))
+    wrapper_path.chmod(0o755)
+    print(f"Installed wrapper script: {wrapper_path}")
+
+    # Install .desktop file for pikpak:// URL scheme
+    apps_dir = Path.home() / ".local/share/applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    desktop_file = apps_dir / "pikpak-handler.desktop"
+    desktop_file.write_text(DESKTOP_TEMPLATE.format(wrapper_path=wrapper_path))
+    print(f"Installed URL handler: {desktop_file}")
+
+    # Register as magnet: handler
+    subprocess.run(['xdg-mime', 'default', 'pikpak-handler.desktop', 'x-scheme-handler/magnet'],
+                   capture_output=True)
+    subprocess.run(['update-desktop-database', str(apps_dir)], capture_output=True)
+    print("Registered as magnet: handler")
+
+    print("\nPlease restart Nautilus: nautilus -q")
+
 
 def uninstall():
     loader_file = Path.home() / ".local/share/nautilus-python/extensions/pikpak_nautilus_loader.py"
-    if loader_file.exists():
-        loader_file.unlink()
-        print("Extension uninstalled.")
-    else:
-        print("Extension not found.")
+    desktop_file = Path.home() / ".local/share/applications/pikpak-handler.desktop"
+    wrapper_file = Path.home() / ".local/bin/pikpak-add"
+
+    removed = False
+    for f, name in [(loader_file, "Nautilus extension"),
+                    (desktop_file, "URL handler"),
+                    (wrapper_file, "wrapper script")]:
+        if f.exists():
+            f.unlink()
+            print(f"Removed {name}")
+            removed = True
+
+    if not removed:
+        print("Nothing to uninstall")
