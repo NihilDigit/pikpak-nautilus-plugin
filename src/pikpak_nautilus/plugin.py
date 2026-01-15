@@ -18,14 +18,36 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
             stderr=subprocess.DEVNULL
         )
 
+    def _on_refresh_clicked(self, menu, *args):
+        # Using vfs/refresh is better than forget because it pre-fetches the structure
+        subprocess.run(['rclone', 'rc', 'vfs/refresh', 'recursive=true', '--fast-list'])
+
     def get_background_items(self, *args):
-        item = Nautilus.MenuItem(
+        items = []
+        
+        add_link_item = Nautilus.MenuItem(
             name="PikPak::AddLink",
             label="PikPak: Add Download Link",
             tip="Add magnet link or download URL to PikPak"
         )
-        item.connect("activate", self._on_add_link_clicked)
-        return [item]
+        add_link_item.connect("activate", self._on_add_link_clicked)
+        items.append(add_link_item)
+
+        refresh_item = Nautilus.MenuItem(
+            name="PikPak::RefreshCache",
+            label="Rclone: Refresh Cache",
+            tip="Refresh rclone directory cache (SIGHUP)"
+        )
+        refresh_item.connect("activate", self._on_refresh_clicked)
+        items.append(refresh_item)
+
+        return items
 
     def get_file_items(self, *args):
-        return []
+        refresh_item = Nautilus.MenuItem(
+            name="PikPak::RefreshCacheFile",
+            label="Rclone: Refresh Cache",
+            tip="Refresh rclone directory cache (SIGHUP)"
+        )
+        refresh_item.connect("activate", self._on_refresh_clicked)
+        return [refresh_item]
