@@ -37,11 +37,11 @@ def submit_to_pikpak(url, on_complete=None):
                 name = data.get('file_name', 'Unknown')
                 status = data.get('message', 'Submitted')
                 subprocess.Popen(['notify-send', 'PikPak', f'{name}\n{status}'])
-                # Proactively refresh rclone cache via RC with notifications
+                # Clear cache via RC so the next access sees the new file
                 refresh_cmd = (
-                    'notify-send "Rclone" "Refreshing cache..." && '
-                    'rclone rc vfs/refresh recursive=true --fast-list && '
-                    'notify-send "Rclone" "Cache refreshed."'
+                    'notify-send "Rclone" "Clearing cache..." && '
+                    'rclone rc vfs/forget && '
+                    'notify-send "Rclone" "Cache cleared."'
                 )
                 subprocess.Popen(['bash', '-c', refresh_cmd])
                 success = True
