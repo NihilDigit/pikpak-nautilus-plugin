@@ -8,7 +8,8 @@ import threading
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+gi.require_version('Gdk', '4.0')
+from gi.repository import Gtk, Adw, GLib, Gdk
 
 
 def get_clipboard():
@@ -116,6 +117,11 @@ class LinkDialog(Gtk.Window):
         self.entry.grab_focus()
         self.connect("close-request", self._on_close)
 
+        # Add keyboard event controller for Esc key
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(key_controller)
+
     def set_submit_mode(self, enabled):
         self._submit_mode = enabled
 
@@ -153,6 +159,13 @@ class LinkDialog(Gtk.Window):
 
     def _on_close(self, *args):
         self.get_application().set_exit_code(1)
+        return False
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        """Handle Esc key to close dialog."""
+        if keyval == Gdk.KEY_Escape:
+            self._on_cancel()
+            return True
         return False
 
 
