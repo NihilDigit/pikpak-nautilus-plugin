@@ -2,7 +2,11 @@ import subprocess
 import os
 import gi
 gi.require_version('Nautilus', '4.1')
-from gi.repository import Nautilus, GObject
+from gi.repository import Nautilus, GObject, GLib
+try:
+    from .notify import send_notification
+except ImportError:
+    from notify import send_notification
 
 DIALOG_SCRIPT = os.path.join(os.path.dirname(__file__), 'dialog.py')
 
@@ -19,14 +23,22 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         )
 
     def _on_refresh_clicked(self, menu, *args):
-        # Combining forget and refresh for maximum reliability
-        # asynchronous=true ensures it returns immediately to keep UI responsive
-        script = (
-            'rclone rc vfs/forget && '
-            'rclone rc vfs/refresh recursive=true asynchronous=true && '
-            'notify-send "Rclone" "Cache refreshed"'
+        proc = subprocess.Popen(
+            ["bash", "-c", "rclone rc vfs/forget && rclone rc vfs/refresh recursive=true asynchronous=true"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        subprocess.Popen(["bash", "-c", script])
+
+        def _check():
+            if proc.poll() is None:
+                return True
+            if proc.returncode == 0:
+                send_notification("Rclone", "Cache refreshed")
+            else:
+                send_notification("Rclone Error", "Refresh failed")
+            return False
+
+        GLib.timeout_add(200, _check)
 
     def get_background_items(self, *args):
         items = []
@@ -42,7 +54,7 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         refresh_item = Nautilus.MenuItem(
             name="PikPak::RefreshCache",
             label="Rclone: Refresh Cache",
-            tip="Refresh rclone directory cache (SIGHUP)"
+            tip="Refresh rclone directory cache"
         )
         refresh_item.connect("activate", self._on_refresh_clicked)
         items.append(refresh_item)
@@ -53,7 +65,7 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
         refresh_item = Nautilus.MenuItem(
             name="PikPak::RefreshCacheFile",
             label="Rclone: Refresh Cache",
-            tip="Refresh rclone directory cache (SIGHUP)"
+            tip="Refresh rclone directory cache"
         )
         refresh_item.connect("activate", self._on_refresh_clicked)
         return [refresh_item]

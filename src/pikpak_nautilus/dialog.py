@@ -5,11 +5,16 @@ import json
 import subprocess
 import sys
 import threading
+from pathlib import Path
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, Adw, GLib, Gdk
+try:
+    from .notify import send_notification
+except ImportError:
+    from notify import send_notification
 
 
 def get_clipboard():
@@ -21,6 +26,20 @@ def get_clipboard():
             return subprocess.check_output(['xclip', '-o', '-sel', 'clip'], stderr=subprocess.DEVNULL).decode('utf-8').strip()
     except:
         return ""
+
+
+def _request_debounced_refresh(timeout_seconds=5):
+    state_dir = Path("/tmp/pikpak_refresh")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    last_req = state_dir / "last_req"
+    last_req.write_text(str(int(GLib.get_real_time() / 1_000_000)))
+
+    worker = Path(__file__).with_name("refresh_worker.py")
+    subprocess.Popen(
+        [sys.executable, str(worker), str(timeout_seconds)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def submit_to_pikpak(url, on_complete=None):
@@ -36,34 +55,17 @@ def submit_to_pikpak(url, on_complete=None):
                 data = json.loads(result.stdout)
                 name = data.get('file_name', 'Unknown')
                 status = data.get('message', 'Submitted')
-                subprocess.Popen(['notify-send', 'PikPak', f'{name}\n{status}'])
-                # Debounced refresh: waits 10s after the LAST download request
-                # This prevents rapid-fire refreshes when adding many links
-                debounce_cmd = (
-                    'mkdir -p /tmp/pikpak_refresh && '
-                    'date +%s > /tmp/pikpak_refresh/last_req && '
-                    'flock -n /tmp/pikpak_refresh/lock bash -c "'
-                    '  while true; do '
-                    '    last=\\$(cat /tmp/pikpak_refresh/last_req); '
-                    '    now=\\$(date +%s); '
-                    '    if [ \\$((now - last)) -ge 10 ]; then '
-                    '      rclone rc vfs/forget && '
-                    '      rclone rc vfs/refresh recursive=true asynchronous=true && '
-                    '      notify-send \\"Rclone\\" \\"Batch cache refresh complete\\"; '
-                    '      break; '
-                    '    fi; '
-                    '    sleep 2; '
-                    '  done"'
-                )
-                subprocess.Popen(['bash', '-c', debounce_cmd])
+                send_notification('PikPak', f'{name}\n{status}')
+                # Debounced refresh: waits 5s after the LAST download request
+                _request_debounced_refresh(5)
                 success = True
             else:
                 error = result.stderr or 'Unknown error'
-                subprocess.Popen(['notify-send', 'PikPak Error', error[:100]])
+                send_notification('PikPak Error', error[:100])
         except subprocess.TimeoutExpired:
-            subprocess.Popen(['notify-send', 'PikPak Error', 'Request timed out'])
+            send_notification('PikPak Error', 'Request timed out')
         except Exception as e:
-            subprocess.Popen(['notify-send', 'PikPak Error', str(e)[:100]])
+            send_notification('PikPak Error', str(e)[:100])
 
         if on_complete:
             GLib.idle_add(on_complete, success)
@@ -79,6 +81,7 @@ class LinkDialog(Gtk.Window):
         self.set_default_size(450, -1)
         self.set_resizable(False)
         self._submit_mode = False
+        self._loading = False
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_margin_top(16)
@@ -152,6 +155,7 @@ class LinkDialog(Gtk.Window):
             self.entry.set_position(-1)
 
     def _set_loading(self, loading):
+        self._loading = loading
         self.entry.set_sensitive(not loading)
         self.submit_btn.set_sensitive(not loading)
         self.cancel_btn.set_sensitive(not loading)
@@ -164,6 +168,8 @@ class LinkDialog(Gtk.Window):
         self.get_application().quit()
 
     def _on_submit(self, *args):
+        if self._loading:
+            return
         text = self.entry.get_text().strip()
         if text:
             if self._submit_mode:
