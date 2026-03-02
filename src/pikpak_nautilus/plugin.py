@@ -24,7 +24,7 @@ class PikPakMenuProvider(GObject.Object, Nautilus.MenuProvider):
 
     def _on_refresh_clicked(self, menu, *args):
         proc = subprocess.Popen(
-            ["bash", "-c", "rclone rc vfs/forget && rclone rc vfs/refresh recursive=true asynchronous=true"],
+            ["bash", "-c", "rclone rc vfs/forget && rclone rc vfs/refresh recursive=true _async=true"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

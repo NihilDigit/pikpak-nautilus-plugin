@@ -32,7 +32,7 @@ def main(timeout_seconds=5):
             now = int(time.time())
             if now - last >= timeout_seconds:
                 result = subprocess.run(
-                    ["bash", "-c", "rclone rc vfs/forget && rclone rc vfs/refresh recursive=true asynchronous=true"],
+                    ["bash", "-c", "rclone rc vfs/forget && rclone rc vfs/refresh recursive=true _async=true"],
                     capture_output=True,
                     text=True,
                     timeout=30,
